@@ -21,12 +21,12 @@ const Hex = struct {
         const q_total = @intToFloat(f64, @as(u32, self.q[0]) + self.q[1]);
         const s_total = @intToFloat(f64, @as(u32, self.s[0]) + self.s[1]);
         const r_total = @intToFloat(f64, @as(u32, self.r[0]) + self.r[1]);
-        // const u16_max = @intToFloat(f64, ~@as(u16, 0));
-        const avg = (q_total + s_total + r_total); // / (u16_max * 6.0);
+        const u16_max = @intToFloat(f64, ~@as(u16, 0));
+        const avg = (q_total + s_total + r_total) / (u16_max * 6.0);
         if (avg == 0.0) {
             return 0.0;
         }
-        return (@log(avg)) / 1.0;
+        return avg * 100.0;
     }
 };
 
@@ -53,24 +53,25 @@ pub fn main() anyerror!void {
         defer gpa.free(arg1_str);
     }
 
-    var map = try newMap(arena, 70, 70);
-    var map_new = try newMap(arena, 70, 70);
+    var map = try newMap(arena, 140, 180);
+    var map_new = try newMap(arena, 140, 180);
 
-    const hex = map.getHex(AxialPoint{ .q = 20, .r = 25 });
-    hex.q[0] = 0xffff;
-    hex.q[1] = 0xffff;
-    hex.s[0] = 0xffff;
-    hex.s[1] = 0xffff;
-    hex.r[0] = 0xffff;
-    hex.r[1] = 0xffff;
-
-    const hex2 = map.getHex(AxialPoint{ .q = 30, .r = 25 });
-    hex2.q[0] = 0xffff;
-    hex2.q[1] = 0xffff;
-    hex2.s[0] = 0xffff;
-    hex2.s[1] = 0xffff;
-    hex2.r[0] = 0xffff;
-    hex2.r[1] = 0xffff;
+    const drop_pos = AxialPoint{ .q = 70, .r = 70 };
+    const hex = map.getHex(drop_pos);
+    maxOutHex(hex);
+    for (map.getNeighbours(drop_pos)) |nb| {
+        if (nb) |nb_p| {
+            maxOutHex(nb_p);
+        }
+    }
+    const drop_pos2 = AxialPoint{ .q = 75, .r = 75 };
+    const hex2 = map.getHex(drop_pos2);
+    maxOutHex(hex2);
+    for (map.getNeighbours(drop_pos2)) |nb| {
+        if (nb) |nb_p| {
+            maxOutHex(nb_p);
+        }
+    }
 
     //renderMap(&map);
     ////
@@ -87,7 +88,9 @@ pub fn main() anyerror!void {
     }
 
     const cwd = fs.cwd();
-    var f = try cwd.createFile("test.ppm", fs.File.CreateFlags{});
+    const file_name = try std.fmt.allocPrint(gpa, "wave_{d}.ppm", .{iter_max});
+    defer gpa.free(file_name);
+    var f = try cwd.createFile(file_name, fs.File.CreateFlags{});
     defer f.close();
 
     const width: usize = 800;
@@ -97,41 +100,20 @@ pub fn main() anyerror!void {
     try std.fmt.format(f.writer(), "{d} {d}\n", .{ width, height });
     try f.writeAll("255\n");
     var pixel_map = [_]u8{0} ** (width * height * 3);
-    renderSquare(&map, width, height, &pixel_map);
+    renderToPixeLBuf(&map, width, height, &pixel_map);
     try f.writeAll(&pixel_map);
 }
-fn renderMap(map: *Map) void {
-    var result: [80][80:0]u8 = [_][80:0]u8{[_:0]u8{' '} ** 80} ** 80;
-    var q: usize = 0;
-    while (q < 40) {
-        var r: usize = 0;
-        while (r < 50) {
-            const ap = AxialPoint{ .q = q, .r = r };
-            const p = axialToSquare(ap);
-            const hex_energy = map.getHex(ap).energyTotal();
-            if (hex_energy < 1) {
-                result[p.y][p.x] = '.';
-            } else if (hex_energy < 2) {
-                result[p.y][p.x] = ',';
-            } else if (hex_energy < 5) {
-                result[p.y][p.x] = '*';
-            } else if (hex_energy < 10) {
-                result[p.y][p.x] = '0';
-            } else if (hex_energy < 20) {
-                result[p.y][p.x] = '@';
-            } else {
-                result[p.y][p.x] = '#';
-            }
-            r += 1;
-        }
-        q += 1;
-    }
-    for (result) |str| {
-        std.debug.print("{s}\n", .{str});
-    }
+
+fn maxOutHex(h: *Hex) void {
+    h.q[0] = 0xffff;
+    h.q[1] = 0xffff;
+    h.s[0] = 0xffff;
+    h.s[1] = 0xffff;
+    h.r[0] = 0xffff;
+    h.r[1] = 0xffff;
 }
 
-fn renderSquare(map: *Map, width: usize, height: usize, pixels: []u8) void {
+fn renderToPixeLBuf(map: *Map, width: usize, height: usize, pixels: []u8) void {
     var y: usize = 0;
     while (y < height) {
         var x: usize = 0;
@@ -144,12 +126,12 @@ fn renderSquare(map: *Map, width: usize, height: usize, pixels: []u8) void {
                     pixels[pix_idx + 1] = @floatToInt(u8, hex_energy * 2.5);
                     pixels[pix_idx + 2] = @floatToInt(u8, hex_energy * 2.5);
                 } else {
-                    pixels[pix_idx] = 10;
+                    pixels[pix_idx] = 100;
                     pixels[pix_idx + 1] = 0;
                     pixels[pix_idx + 2] = 0;
                 }
             } else {
-                pixels[pix_idx] = 10;
+                pixels[pix_idx] = 100;
                 pixels[pix_idx + 1] = 0;
                 pixels[pix_idx + 2] = 0;
             }
@@ -175,7 +157,7 @@ fn axialToSquare(ap: AxialPoint) SquarePoint {
 }
 
 fn squareToAxial(sp: SquarePoint) ?AxialPoint {
-    const size: f64 = 5;
+    const size: f64 = 2;
     const q_f = ((std.math.sqrt(3.0) / 3.0) * @intToFloat(f64, sp.x) - (1.0 / 3.0) * @intToFloat(f64, sp.y)) / size;
     const r_f = ((2.0 / 3.0) * @intToFloat(f64, sp.y)) / size;
     if (q_f < 0.0 or r_f < 0.0) {
